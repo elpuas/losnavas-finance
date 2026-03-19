@@ -1,25 +1,130 @@
-import { mockData } from '../data';
+import { useEffect, useState } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { DollarSign, TrendingUp, TrendingDown, AlertCircle, Users } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
+
+type Period = {
+  id: string;
+  name: string;
+  start_date: string;
+};
+
+type ExpenseRow = {
+  amount: number;
+  type: 'fixed' | 'extra';
+};
+
+type IncomeRow = {
+  amount: number;
+};
+
+function calculateFinancialTotals(expenses: ExpenseRow[], income: IncomeRow[]) {
+  const fixedExpenses = expenses.filter((expense) => expense.type === 'fixed');
+  const extraExpenses = expenses.filter((expense) => expense.type === 'extra');
+
+  const totalFixed = fixedExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+  const totalExtra = extraExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+  const totalIncome = income.reduce((sum, entry) => sum + entry.amount, 0);
+  const remaining = totalIncome - totalFixed - totalExtra;
+  const split = remaining / 2;
+
+  return {
+    totalFixed,
+    totalExtra,
+    totalIncome,
+    remaining,
+    split,
+  };
+}
 
 export default function Dashboard() {
-  const totalIncome = mockData.income.reduce((sum, i) => sum + i.amount, 0);
+  const [periods, setPeriods] = useState<Period[]>([]);
+  const [selectedPeriodId, setSelectedPeriodId] = useState('');
+  const [selectedPeriodName, setSelectedPeriodName] = useState('No period selected');
+  const [totals, setTotals] = useState({
+    totalFixed: 0,
+    totalExtra: 0,
+    totalIncome: 0,
+    remaining: 0,
+    split: 0,
+  });
 
-  const fixedExpenses = mockData.expenses
-    .filter((e) => e.active && e.type === 'fixed')
-    .reduce((sum, e) => sum + e.amount, 0);
+  useEffect(() => {
+    async function loadPeriods() {
+      const { data, error } = await supabase
+        .from('periods')
+        .select('id, name, start_date')
+        .order('start_date', { ascending: false });
 
-  const extraExpenses = mockData.expenses
-    .filter((e) => e.active && e.type === 'extra')
-    .reduce((sum, e) => sum + e.amount, 0);
+      if (error) {
+        console.error('Periods fetch failed', error);
+        return;
+      }
 
-  const totalExpenses = fixedExpenses + extraExpenses;
-  const remainingBalance = totalIncome - totalExpenses;
-  const splitAmount = remainingBalance / 2;
+      const fetchedPeriods = data ?? [];
+      setPeriods(fetchedPeriods);
+
+      const initialPeriod = fetchedPeriods[0] ?? null;
+
+      if (!initialPeriod) {
+        setSelectedPeriodName('No period selected');
+        console.log('Financial calculations', {
+          message: 'No periods found.',
+        });
+        return;
+      }
+
+      setSelectedPeriodId(initialPeriod.id);
+      setSelectedPeriodName(initialPeriod.name);
+    }
+
+    loadPeriods();
+  }, []);
+
+  useEffect(() => {
+    async function loadFinancialData() {
+      if (!selectedPeriodId) {
+        return;
+      }
+
+      const selectedPeriod = periods.find((period) => period.id === selectedPeriodId) ?? null;
+      setSelectedPeriodName(selectedPeriod?.name ?? 'No period selected');
+
+      const [{ data: expenses, error: expensesError }, { data: income, error: incomeError }] =
+        await Promise.all([
+          supabase.from('expenses').select('amount, type').eq('period_id', selectedPeriodId),
+          supabase.from('income').select('amount').eq('period_id', selectedPeriodId),
+        ]);
+
+      if (expensesError || incomeError) {
+        console.error('Financial calculations', {
+          expensesError,
+          incomeError,
+        });
+        return;
+      }
+
+      const nextTotals = calculateFinancialTotals(expenses ?? [], income ?? []);
+      setTotals(nextTotals);
+
+      console.log('Financial calculations', {
+        current_period_name: selectedPeriod?.name ?? 'Unknown period',
+        total_fixed: nextTotals.totalFixed,
+        total_extra: nextTotals.totalExtra,
+        total_income: nextTotals.totalIncome,
+        remaining: nextTotals.remaining,
+        split: nextTotals.split,
+      });
+    }
+
+    loadFinancialData();
+  }, [periods, selectedPeriodId]);
+
+  const totalExpenses = totals.totalFixed + totals.totalExtra;
 
   const chartData = [
-    { name: 'Fixed', value: fixedExpenses, color: '#6b7280' },
-    { name: 'Extra', value: extraExpenses, color: '#f59e0b' },
+    { name: 'Fixed', value: totals.totalFixed, color: '#6b7280' },
+    { name: 'Extra', value: totals.totalExtra, color: '#f59e0b' },
   ];
 
   return (
@@ -27,7 +132,25 @@ export default function Dashboard() {
       {/* Header */}
       <div className="pt-4">
         <h1 className="text-2xl font-bold text-gray-900">Family Finance</h1>
-        <p className="text-sm text-gray-500 mt-1">Fixed-expense-first model</p>
+        <p className="text-sm text-gray-500 mt-1">{selectedPeriodName}</p>
+      </div>
+
+      <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-200">
+        <label htmlFor="period-selector" className="block text-sm font-medium text-gray-700 mb-2">
+          Select Period
+        </label>
+        <select
+          id="period-selector"
+          value={selectedPeriodId}
+          onChange={(event) => setSelectedPeriodId(event.target.value)}
+          className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none"
+        >
+          {periods.map((period) => (
+            <option key={period.id} value={period.id}>
+              {period.name}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* Income Card */}
@@ -37,9 +160,9 @@ export default function Dashboard() {
           <TrendingUp className="w-5 h-5 opacity-90" />
         </div>
         <div className="text-4xl font-bold mb-1">
-          ${totalIncome.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+          ${totals.totalIncome.toLocaleString('en-US', { minimumFractionDigits: 2 })}
         </div>
-        <div className="text-sm opacity-90">Monthly earnings</div>
+        <div className="text-sm opacity-90">Income for selected period</div>
       </div>
 
       {/* Expenses Breakdown */}
@@ -51,7 +174,7 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="text-2xl font-bold text-gray-900">
-            ${fixedExpenses.toLocaleString('en-US')}
+            ${totals.totalFixed.toLocaleString('en-US')}
           </div>
           <div className="text-xs text-gray-500 mt-1">Fixed Expenses</div>
           <div className="text-[10px] text-gray-400 mt-0.5">Mandatory costs</div>
@@ -64,7 +187,7 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="text-2xl font-bold text-orange-600">
-            ${extraExpenses.toLocaleString('en-US')}
+            ${totals.totalExtra.toLocaleString('en-US')}
           </div>
           <div className="text-xs text-gray-500 mt-1">Extra Expenses</div>
           <div className="text-[10px] text-gray-400 mt-0.5">Optional costs</div>
@@ -115,7 +238,7 @@ export default function Dashboard() {
           <TrendingDown className="w-5 h-5 opacity-90" />
         </div>
         <div className="text-4xl font-bold mb-1">
-          ${remainingBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+          ${totals.remaining.toLocaleString('en-US', { minimumFractionDigits: 2 })}
         </div>
         <div className="text-sm opacity-90">
           After ${totalExpenses.toLocaleString('en-US')} in expenses
@@ -131,20 +254,20 @@ export default function Dashboard() {
         <div className="text-center mb-4">
           <div className="text-sm text-gray-500 mb-1">Each person receives</div>
           <div className="text-3xl font-bold text-blue-600">
-            ${splitAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+            ${totals.split.toLocaleString('en-US', { minimumFractionDigits: 2 })}
           </div>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div className="bg-blue-50 rounded-xl p-4 text-center">
             <div className="text-sm text-blue-600 mb-1">Alfredo</div>
             <div className="text-xl font-bold text-blue-700">
-              ${splitAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              ${totals.split.toLocaleString('en-US', { minimumFractionDigits: 2 })}
             </div>
           </div>
           <div className="bg-pink-50 rounded-xl p-4 text-center">
             <div className="text-sm text-pink-600 mb-1">Cata</div>
             <div className="text-xl font-bold text-pink-700">
-              ${splitAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              ${totals.split.toLocaleString('en-US', { minimumFractionDigits: 2 })}
             </div>
           </div>
         </div>
@@ -157,26 +280,26 @@ export default function Dashboard() {
           <div className="flex justify-between items-center">
             <span className="text-sm text-gray-600">Income</span>
             <span className="text-sm font-semibold text-green-600">
-              ${totalIncome.toLocaleString('en-US')}
+              ${totals.totalIncome.toLocaleString('en-US')}
             </span>
           </div>
           <div className="flex justify-between items-center">
             <span className="text-sm text-gray-600">Fixed Expenses</span>
             <span className="text-sm font-semibold text-gray-700">
-              -${fixedExpenses.toLocaleString('en-US')}
+              -${totals.totalFixed.toLocaleString('en-US')}
             </span>
           </div>
           <div className="flex justify-between items-center">
             <span className="text-sm text-gray-600">Extra Expenses</span>
             <span className="text-sm font-semibold text-orange-600">
-              -${extraExpenses.toLocaleString('en-US')}
+              -${totals.totalExtra.toLocaleString('en-US')}
             </span>
           </div>
           <div className="h-px bg-gray-300 my-2"></div>
           <div className="flex justify-between items-center">
             <span className="text-sm font-semibold text-gray-900">Balance</span>
             <span className="text-sm font-bold text-blue-600">
-              ${remainingBalance.toLocaleString('en-US')}
+              ${totals.remaining.toLocaleString('en-US')}
             </span>
           </div>
         </div>
