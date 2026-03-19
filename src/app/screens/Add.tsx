@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useOutletContext } from 'react-router';
 import { User, ExpenseType } from '../types';
 import type { AppLayoutContext } from '../components/Layout';
@@ -15,6 +15,16 @@ import {
   Package,
 } from 'lucide-react';
 
+type TransactionTemplate = {
+  id: string;
+  name: string;
+  type: 'income' | 'expense';
+  subtype: 'fixed' | 'extra' | null;
+  user_name: string | null;
+};
+
+const ADD_NEW_TEMPLATE = 'add-new';
+
 export default function Add() {
   const navigate = useNavigate();
   const { currentPeriodId, refreshCurrentPeriodData } = useOutletContext<AppLayoutContext>();
@@ -28,6 +38,9 @@ export default function Add() {
     date: new Date().toISOString().split('T')[0],
     notes: '',
   });
+  const [templates, setTemplates] = useState<TransactionTemplate[]>([]);
+  const [selectedIncomeTemplateId, setSelectedIncomeTemplateId] = useState(ADD_NEW_TEMPLATE);
+  const [selectedFixedTemplateId, setSelectedFixedTemplateId] = useState(ADD_NEW_TEMPLATE);
 
   const categories = [
     { value: 'education', label: 'Education', icon: GraduationCap },
@@ -39,6 +52,85 @@ export default function Add() {
     { value: 'other', label: 'Other', icon: Package },
   ];
 
+  useEffect(() => {
+    async function loadTemplates() {
+      const { data, error } = await supabase
+        .from('transaction_templates')
+        .select('id, name, type, subtype, user_name')
+        .order('name', { ascending: true });
+
+      if (error) {
+        console.error('Transaction templates fetch failed', error);
+        return;
+      }
+
+      setTemplates(data ?? []);
+    }
+
+    loadTemplates();
+  }, []);
+
+  const incomeTemplates = templates.filter((template) => template.type === 'income');
+  const fixedExpenseTemplates = templates.filter(
+    (template) => template.type === 'expense' && template.subtype === 'fixed'
+  );
+  const extraExpenseTemplates = templates.filter(
+    (template) => template.type === 'expense' && template.subtype === 'extra'
+  );
+
+  async function createTemplate(
+    templateName: string,
+    templateType: 'income' | 'expense',
+    templateSubtype: 'fixed' | 'extra' | null
+  ) {
+    const trimmedName = templateName.trim();
+
+    if (!trimmedName) {
+      return false;
+    }
+
+    const { data, error } = await supabase
+      .from('transaction_templates')
+      .insert({
+        name: trimmedName,
+        type: templateType,
+        subtype: templateSubtype,
+        user_name: formData.user || null,
+      })
+      .select('id, name, type, subtype, user_name')
+      .single();
+
+    if (error) {
+      console.error('Transaction template insert failed', error);
+      return false;
+    }
+
+    setTemplates((currentTemplates) => [...currentTemplates, data]);
+    return true;
+  }
+
+  function resolveTransactionName() {
+    if (type === 'income') {
+      if (selectedIncomeTemplateId === ADD_NEW_TEMPLATE) {
+        return formData.name.trim();
+      }
+
+      return (
+        incomeTemplates.find((template) => template.id === selectedIncomeTemplateId)?.name ??
+        formData.name.trim()
+      );
+    }
+
+    if (formData.expenseType === 'fixed' && selectedFixedTemplateId !== ADD_NEW_TEMPLATE) {
+      return (
+        fixedExpenseTemplates.find((template) => template.id === selectedFixedTemplateId)?.name ??
+        formData.name.trim()
+      );
+    }
+
+    return formData.name.trim();
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -49,17 +141,46 @@ export default function Add() {
       return;
     }
 
+    const transactionName = resolveTransactionName();
+
+    if (!transactionName) {
+      console.error('Add transaction failed', {
+        message: 'Transaction name is required.',
+      });
+      return;
+    }
+
     const amount = Number(formData.amount);
 
-    if (type === 'expense') {
-      const { error } = await supabase.from('expenses').insert({
-        name: formData.name,
+    if (!Number.isFinite(amount)) {
+      console.error('Add transaction failed', {
+        message: 'Amount must be a valid number.',
+      });
+      return;
+    }
+
+    if (type === 'income' && selectedIncomeTemplateId === ADD_NEW_TEMPLATE) {
+      const templateCreated = await createTemplate(transactionName, 'income', null);
+
+      if (!templateCreated) {
+        return;
+      }
+    }
+
+    if (type === 'expense' && formData.expenseType === 'fixed' && selectedFixedTemplateId === ADD_NEW_TEMPLATE) {
+      const templateCreated = await createTemplate(transactionName, 'expense', 'fixed');
+
+      if (!templateCreated) {
+        return;
+      }
+    }
+
+    if (type === 'income') {
+      const { error } = await supabase.from('income').insert({
+        name: transactionName,
         amount,
-        category: formData.category,
-        type: formData.expenseType,
-        note: formData.notes || null,
-        expense_date: formData.date,
         user_name: formData.user || null,
+        income_date: formData.date,
         period_id: currentPeriodId,
       });
 
@@ -68,11 +189,14 @@ export default function Add() {
         return;
       }
     } else {
-      const { error } = await supabase.from('income').insert({
-        name: formData.name,
+      const { error } = await supabase.from('expenses').insert({
+        name: transactionName,
         amount,
+        category: formData.category,
+        type: formData.expenseType,
+        note: formData.notes || null,
+        expense_date: formData.date,
         user_name: formData.user || null,
-        income_date: formData.date,
         period_id: currentPeriodId,
       });
 
@@ -129,20 +253,41 @@ export default function Add() {
           </button>
         </div>
 
-        {/* Name Input */}
-        <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Name
-          </label>
-          <input
-            type="text"
-            value={formData.name}
-            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-            placeholder="Enter name"
-            className="w-full px-4 py-3 bg-gray-50 rounded-xl border-0 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            required
-          />
-        </div>
+        {type === 'income' && (
+          <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Template
+            </label>
+            <select
+              value={selectedIncomeTemplateId}
+              onChange={(e) => setSelectedIncomeTemplateId(e.target.value)}
+              className="w-full px-4 py-3 bg-gray-50 rounded-xl border-0 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value={ADD_NEW_TEMPLATE}>Add new</option>
+              {incomeTemplates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {(type === 'income' && selectedIncomeTemplateId === ADD_NEW_TEMPLATE) && (
+          <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Name
+            </label>
+            <input
+              type="text"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              placeholder="Enter name"
+              className="w-full px-4 py-3 bg-gray-50 rounded-xl border-0 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              required
+            />
+          </div>
+        )}
 
         {/* Amount Input */}
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
@@ -286,7 +431,65 @@ export default function Add() {
                 })}
               </div>
             </div>
+
+            {formData.expenseType === 'fixed' && (
+              <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Template
+                </label>
+                <select
+                  value={selectedFixedTemplateId}
+                  onChange={(e) => setSelectedFixedTemplateId(e.target.value)}
+                  className="w-full px-4 py-3 bg-gray-50 rounded-xl border-0 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value={ADD_NEW_TEMPLATE}>Add new</option>
+                  {fixedExpenseTemplates.map((template) => (
+                    <option key={template.id} value={template.id}>
+                      {template.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </>
+        )}
+
+        {type === 'expense' && formData.expenseType === 'fixed' && selectedFixedTemplateId === ADD_NEW_TEMPLATE && (
+          <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Name
+            </label>
+            <input
+              type="text"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              placeholder="Enter name"
+              className="w-full px-4 py-3 bg-gray-50 rounded-xl border-0 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              required
+            />
+          </div>
+        )}
+
+        {type === 'expense' && formData.expenseType === 'extra' && (
+          <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Name
+            </label>
+            <input
+              type="text"
+              list="extra-expense-template-suggestions"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              placeholder="Enter name"
+              className="w-full px-4 py-3 bg-gray-50 rounded-xl border-0 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              required
+            />
+            <datalist id="extra-expense-template-suggestions">
+              {extraExpenseTemplates.map((template) => (
+                <option key={template.id} value={template.name} />
+              ))}
+            </datalist>
+          </div>
         )}
 
         {/* Notes */}
