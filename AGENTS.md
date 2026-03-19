@@ -51,3 +51,33 @@ split = remaining / 2
 - Do not push directly to main
 - Keep commits focused and minimal
 - Do not rewrite history or force push
+
+## Change Logging (Mandatory)
+
+- Every task must generate a log file inside the `.context/` folder
+- If the folder does not exist, create it
+
+### File naming
+
+Use the following format:
+
+.context/YYYY-MM-DD-HHMM-[short-task-name].md
+
+Example:
+.context/2026-03-19-0930-supabase-client.md
+
+### Content requirements
+
+Each log file must include:
+
+- Task summary
+- Files created or modified
+- Description of changes
+- Any assumptions made
+- Next possible steps (if relevant)
+
+### Constraints
+
+- Do not overwrite existing logs
+- Always create a new file per task
+- Keep logs concise and readable
