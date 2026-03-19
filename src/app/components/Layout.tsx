@@ -1,9 +1,19 @@
+import { useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router';
 import { LayoutDashboard, Receipt, TrendingUp, Plus } from 'lucide-react';
+
+export type AppLayoutContext = {
+  currentPeriodId: string;
+  setCurrentPeriodId: (periodId: string) => void;
+  periodRefreshCount: number;
+  refreshCurrentPeriodData: () => void;
+};
 
 export default function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
+  const [currentPeriodId, setCurrentPeriodId] = useState('');
+  const [periodRefreshCount, setPeriodRefreshCount] = useState(0);
 
   const navItems = [
     { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -12,10 +22,21 @@ export default function Layout() {
     { path: '/add', icon: Plus, label: 'Add' },
   ];
 
+  function refreshCurrentPeriodData() {
+    setPeriodRefreshCount((count) => count + 1);
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
       <div className="max-w-md mx-auto">
-        <Outlet />
+        <Outlet
+          context={{
+            currentPeriodId,
+            setCurrentPeriodId,
+            periodRefreshCount,
+            refreshCurrentPeriodData,
+          }}
+        />
       </div>
 
       {/* Bottom Navigation */}
