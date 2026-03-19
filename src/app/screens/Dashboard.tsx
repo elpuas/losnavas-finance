@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
+import { useOutletContext } from 'react-router';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { DollarSign, TrendingUp, TrendingDown, AlertCircle, Users } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import type { AppLayoutContext } from '../components/Layout';
 
 type Period = {
   id: string;
@@ -38,8 +40,12 @@ function calculateFinancialTotals(expenses: ExpenseRow[], income: IncomeRow[]) {
 }
 
 export default function Dashboard() {
+  const {
+    currentPeriodId,
+    setCurrentPeriodId,
+    periodRefreshCount,
+  } = useOutletContext<AppLayoutContext>();
   const [periods, setPeriods] = useState<Period[]>([]);
-  const [selectedPeriodId, setSelectedPeriodId] = useState('');
   const [selectedPeriodName, setSelectedPeriodName] = useState('No period selected');
   const [totals, setTotals] = useState({
     totalFixed: 0,
@@ -74,26 +80,39 @@ export default function Dashboard() {
         return;
       }
 
-      setSelectedPeriodId(initialPeriod.id);
-      setSelectedPeriodName(initialPeriod.name);
-    }
-
-    loadPeriods();
-  }, []);
-
-  useEffect(() => {
-    async function loadFinancialData() {
-      if (!selectedPeriodId) {
+      if (!currentPeriodId) {
+        setCurrentPeriodId(initialPeriod.id);
+        setSelectedPeriodName(initialPeriod.name);
         return;
       }
 
-      const selectedPeriod = periods.find((period) => period.id === selectedPeriodId) ?? null;
+      const matchingPeriod = fetchedPeriods.find((period) => period.id === currentPeriodId) ?? null;
+
+      if (!matchingPeriod) {
+        setCurrentPeriodId(initialPeriod.id);
+        setSelectedPeriodName(initialPeriod.name);
+        return;
+      }
+
+      setSelectedPeriodName(matchingPeriod.name);
+    }
+
+    loadPeriods();
+  }, [currentPeriodId, setCurrentPeriodId]);
+
+  useEffect(() => {
+    async function loadFinancialData() {
+      if (!currentPeriodId) {
+        return;
+      }
+
+      const selectedPeriod = periods.find((period) => period.id === currentPeriodId) ?? null;
       setSelectedPeriodName(selectedPeriod?.name ?? 'No period selected');
 
       const [{ data: expenses, error: expensesError }, { data: income, error: incomeError }] =
         await Promise.all([
-          supabase.from('expenses').select('amount, type').eq('period_id', selectedPeriodId),
-          supabase.from('income').select('amount').eq('period_id', selectedPeriodId),
+          supabase.from('expenses').select('amount, type').eq('period_id', currentPeriodId),
+          supabase.from('income').select('amount').eq('period_id', currentPeriodId),
         ]);
 
       if (expensesError || incomeError) {
@@ -118,7 +137,7 @@ export default function Dashboard() {
     }
 
     loadFinancialData();
-  }, [periods, selectedPeriodId]);
+  }, [currentPeriodId, periodRefreshCount, periods]);
 
   const totalExpenses = totals.totalFixed + totals.totalExtra;
 
@@ -141,8 +160,8 @@ export default function Dashboard() {
         </label>
         <select
           id="period-selector"
-          value={selectedPeriodId}
-          onChange={(event) => setSelectedPeriodId(event.target.value)}
+          value={currentPeriodId}
+          onChange={(event) => setCurrentPeriodId(event.target.value)}
           className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none"
         >
           {periods.map((period) => (

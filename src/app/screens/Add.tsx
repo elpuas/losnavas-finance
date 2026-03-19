@@ -1,6 +1,8 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useOutletContext } from 'react-router';
 import { User, ExpenseType } from '../types';
+import type { AppLayoutContext } from '../components/Layout';
+import { supabase } from '../../lib/supabase';
 import {
   GraduationCap,
   Home,
@@ -15,6 +17,7 @@ import {
 
 export default function Add() {
   const navigate = useNavigate();
+  const { currentPeriodId, refreshCurrentPeriodData } = useOutletContext<AppLayoutContext>();
   const [type, setType] = useState<'income' | 'expense'>('expense');
   const [formData, setFormData] = useState({
     name: '',
@@ -36,15 +39,51 @@ export default function Add() {
     { value: 'other', label: 'Other', icon: Package },
   ];
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // In a real app, this would add to state management or database
-    console.log('Adding:', { type, ...formData });
-    if (type === 'income') {
-      navigate('/income');
-    } else {
-      navigate('/expenses');
+
+    if (!currentPeriodId) {
+      console.error('Add transaction failed', {
+        message: 'No current period selected.',
+      });
+      return;
     }
+
+    const amount = Number(formData.amount);
+
+    if (type === 'expense') {
+      const { error } = await supabase.from('expenses').insert({
+        name: formData.name,
+        amount,
+        category: formData.category,
+        type: formData.expenseType,
+        note: formData.notes || null,
+        expense_date: formData.date,
+        user_name: formData.user || null,
+        period_id: currentPeriodId,
+      });
+
+      if (error) {
+        console.error('Add transaction failed', error);
+        return;
+      }
+    } else {
+      const { error } = await supabase.from('income').insert({
+        name: formData.name,
+        amount,
+        user_name: formData.user || null,
+        income_date: formData.date,
+        period_id: currentPeriodId,
+      });
+
+      if (error) {
+        console.error('Add transaction failed', error);
+        return;
+      }
+    }
+
+    refreshCurrentPeriodData();
+    navigate('/');
   };
 
   return (
