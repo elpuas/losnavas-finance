@@ -86,7 +86,7 @@ export default function Add() {
     const trimmedName = templateName.trim();
 
     if (!trimmedName) {
-      return;
+      return false;
     }
 
     const { data, error } = await supabase
@@ -102,10 +102,11 @@ export default function Add() {
 
     if (error) {
       console.error('Transaction template insert failed', error);
-      return;
+      return false;
     }
 
     setTemplates((currentTemplates) => [...currentTemplates, data]);
+    return true;
   }
 
   function resolveTransactionName() {
@@ -149,15 +150,30 @@ export default function Add() {
       return;
     }
 
+    const amount = Number(formData.amount);
+
+    if (!Number.isFinite(amount)) {
+      console.error('Add transaction failed', {
+        message: 'Amount must be a valid number.',
+      });
+      return;
+    }
+
     if (type === 'income' && selectedIncomeTemplateId === ADD_NEW_TEMPLATE) {
-      await createTemplate(transactionName, 'income', null);
+      const templateCreated = await createTemplate(transactionName, 'income', null);
+
+      if (!templateCreated) {
+        return;
+      }
     }
 
     if (type === 'expense' && formData.expenseType === 'fixed' && selectedFixedTemplateId === ADD_NEW_TEMPLATE) {
-      await createTemplate(transactionName, 'expense', 'fixed');
-    }
+      const templateCreated = await createTemplate(transactionName, 'expense', 'fixed');
 
-    const amount = Number(formData.amount);
+      if (!templateCreated) {
+        return;
+      }
+    }
 
     if (type === 'income') {
       const { error } = await supabase.from('income').insert({

@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router';
 import { LayoutDashboard, Receipt, TrendingUp, Plus } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
 
 export type AppLayoutContext = {
   currentPeriodId: string;
@@ -21,6 +22,32 @@ export default function Layout() {
     { path: '/income', icon: TrendingUp, label: 'Income' },
     { path: '/add', icon: Plus, label: 'Add' },
   ];
+
+  useEffect(() => {
+    async function initializeCurrentPeriod() {
+      if (currentPeriodId) {
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('periods')
+        .select('id')
+        .order('start_date', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) {
+        console.error('Current period initialization failed', error);
+        return;
+      }
+
+      if (data?.id) {
+        setCurrentPeriodId(data.id);
+      }
+    }
+
+    initializeCurrentPeriod();
+  }, [currentPeriodId]);
 
   function refreshCurrentPeriodData() {
     setPeriodRefreshCount((count) => count + 1);
