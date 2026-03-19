@@ -1,5 +1,4 @@
-import { useState } from 'react';
-import { useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useOutletContext } from 'react-router';
 import { User, ExpenseType } from '../types';
 import type { AppLayoutContext } from '../components/Layout';
