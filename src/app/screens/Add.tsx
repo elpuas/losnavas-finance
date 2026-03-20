@@ -26,10 +26,15 @@ type TransactionTemplate = {
 
 const ADD_NEW_TEMPLATE = 'add-new';
 
+function normalizeCategory(value: string | null | undefined) {
+  return (value ?? '').trim().toLowerCase();
+}
+
 export default function Add() {
   const navigate = useNavigate();
   const { setCurrentPeriodId, refreshCurrentPeriodData } = useOutletContext<AppLayoutContext>();
   const [type, setType] = useState<'income' | 'expense'>('expense');
+  const [selectedCategory, setSelectedCategory] = useState<string | null>('food');
   const [formData, setFormData] = useState({
     name: '',
     amount: '',
@@ -72,17 +77,23 @@ export default function Add() {
   }, []);
 
   const incomeTemplates = templates.filter((template) => template.type === 'income');
-  const fixedExpenseTemplates = templates.filter(
+  const expenseTemplates = (templates ?? []).filter(
+    (template) => template.type === 'expense'
+  );
+  const filteredTemplates = expenseTemplates.filter(
     (template) =>
-      template.type === 'expense' &&
+      normalizeCategory(template.category) === normalizeCategory(selectedCategory)
+  );
+  const fixedExpenseTemplates = filteredTemplates.filter(
+    (template) =>
       template.subtype === 'fixed' &&
-      template.category === formData.category
+      formData.expenseType === 'fixed'
   );
   const extraExpenseTemplates = templates.filter(
     (template) =>
       template.type === 'expense' &&
       template.subtype === 'extra' &&
-      template.category === formData.category
+      normalizeCategory(template.category) === normalizeCategory(selectedCategory)
   );
 
   async function createTemplate(
@@ -160,6 +171,10 @@ export default function Add() {
       }));
     }
   }, [fixedExpenseTemplates, selectedFixedTemplateId, type]);
+
+  useEffect(() => {
+    setSelectedFixedTemplateId(ADD_NEW_TEMPLATE);
+  }, [selectedCategory]);
 
   function resolveBiweeklyRange(dateValue: string) {
     const [year, month, day] = dateValue.split('-').map(Number);
@@ -523,11 +538,12 @@ export default function Add() {
                     <button
                       key={cat.value}
                       type="button"
-                      onClick={() =>
-                        setFormData({ ...formData, category: cat.value })
-                      }
+                      onClick={() => {
+                        setSelectedCategory(cat.value);
+                        setFormData({ ...formData, category: cat.value });
+                      }}
                       className={`py-3 px-2 rounded-xl font-medium transition-all flex flex-col items-center gap-1.5 ${
-                        formData.category === cat.value
+                        selectedCategory === cat.value
                           ? 'bg-blue-500 text-white'
                           : 'bg-gray-100 text-gray-700'
                       }`}
