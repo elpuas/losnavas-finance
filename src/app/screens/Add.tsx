@@ -21,13 +21,14 @@ type TransactionTemplate = {
   type: 'income' | 'expense';
   subtype: 'fixed' | 'extra' | null;
   user_name: string | null;
+  category: string | null;
 };
 
 const ADD_NEW_TEMPLATE = 'add-new';
 
 export default function Add() {
   const navigate = useNavigate();
-  const { currentPeriodId, refreshCurrentPeriodData } = useOutletContext<AppLayoutContext>();
+  const { setCurrentPeriodId, refreshCurrentPeriodData } = useOutletContext<AppLayoutContext>();
   const [type, setType] = useState<'income' | 'expense'>('expense');
   const [formData, setFormData] = useState({
     name: '',
@@ -56,7 +57,7 @@ export default function Add() {
     async function loadTemplates() {
       const { data, error } = await supabase
         .from('transaction_templates')
-        .select('id, name, type, subtype, user_name')
+        .select('id, name, type, subtype, user_name, category')
         .order('name', { ascending: true });
 
       if (error) {
@@ -72,10 +73,16 @@ export default function Add() {
 
   const incomeTemplates = templates.filter((template) => template.type === 'income');
   const fixedExpenseTemplates = templates.filter(
-    (template) => template.type === 'expense' && template.subtype === 'fixed'
+    (template) =>
+      template.type === 'expense' &&
+      template.subtype === 'fixed' &&
+      template.category === formData.category
   );
   const extraExpenseTemplates = templates.filter(
-    (template) => template.type === 'expense' && template.subtype === 'extra'
+    (template) =>
+      template.type === 'expense' &&
+      template.subtype === 'extra' &&
+      template.category === formData.category
   );
 
   async function createTemplate(
@@ -96,8 +103,9 @@ export default function Add() {
         type: templateType,
         subtype: templateSubtype,
         user_name: formData.user || null,
+        category: templateType === 'expense' ? formData.category : null,
       })
-      .select('id, name, type, subtype, user_name')
+      .select('id, name, type, subtype, user_name, category')
       .single();
 
     if (error) {
@@ -131,15 +139,105 @@ export default function Add() {
     return formData.name.trim();
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!currentPeriodId) {
-      console.error('Add transaction failed', {
-        message: 'No current period selected.',
-      });
+  useEffect(() => {
+    if (type !== 'expense') {
       return;
     }
+
+    const matchingTemplate = fixedExpenseTemplates.find(
+      (template) => template.id === selectedFixedTemplateId
+    );
+
+    if (!matchingTemplate && selectedFixedTemplateId !== ADD_NEW_TEMPLATE) {
+      setSelectedFixedTemplateId(ADD_NEW_TEMPLATE);
+      return;
+    }
+
+    if (matchingTemplate) {
+      setFormData((currentFormData) => ({
+        ...currentFormData,
+        name: matchingTemplate.name,
+      }));
+    }
+  }, [fixedExpenseTemplates, selectedFixedTemplateId, type]);
+
+  function resolveBiweeklyRange(dateValue: string) {
+    const [year, month, day] = dateValue.split('-').map(Number);
+    const monthString = String(month).padStart(2, '0');
+    const startDay = day <= 15 ? '01' : '16';
+    const endDay =
+      day <= 15
+        ? '15'
+        : String(new Date(year, month, 0).getDate()).padStart(2, '0');
+
+    const startDate = `${year}-${monthString}-${startDay}`;
+    const endDate = `${year}-${monthString}-${endDay}`;
+
+    return {
+      startDate,
+      endDate,
+      name: `${startDate} to ${endDate}`,
+    };
+  }
+
+  async function resolvePeriodId(dateValue: string) {
+    const { startDate, endDate, name } = resolveBiweeklyRange(dateValue);
+
+    const { data: existingPeriod, error: periodLookupError } = await supabase
+      .from('periods')
+      .select('id')
+      .eq('start_date', startDate)
+      .eq('end_date', endDate)
+      .maybeSingle();
+
+    if (periodLookupError) {
+      console.error('Period resolution failed', periodLookupError);
+      return null;
+    }
+
+    if (existingPeriod?.id) {
+      return existingPeriod.id;
+    }
+
+    const { data: createdPeriod, error: periodInsertError } = await supabase
+      .from('periods')
+      .insert({
+        start_date: startDate,
+        end_date: endDate,
+        name,
+      })
+      .select('id')
+      .single();
+
+    if (!periodInsertError && createdPeriod?.id) {
+      return createdPeriod.id;
+    }
+
+    if (periodInsertError) {
+      console.error('Period creation failed', {
+        start_date: startDate,
+        end_date: endDate,
+        error: periodInsertError,
+      });
+    }
+
+    const { data: retryPeriod, error: retryLookupError } = await supabase
+      .from('periods')
+      .select('id')
+      .eq('start_date', startDate)
+      .eq('end_date', endDate)
+      .maybeSingle();
+
+    if (retryLookupError) {
+      console.error('Period resolution retry failed', retryLookupError);
+      return null;
+    }
+
+    return retryPeriod?.id ?? null;
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
 
     const transactionName = resolveTransactionName();
 
@@ -155,6 +253,15 @@ export default function Add() {
     if (!Number.isFinite(amount)) {
       console.error('Add transaction failed', {
         message: 'Amount must be a valid number.',
+      });
+      return;
+    }
+
+    const periodId = await resolvePeriodId(formData.date);
+
+    if (!periodId) {
+      console.error('Add transaction failed', {
+        message: 'Unable to resolve a valid period for the selected date.',
       });
       return;
     }
@@ -181,7 +288,7 @@ export default function Add() {
         amount,
         user_name: formData.user || null,
         income_date: formData.date,
-        period_id: currentPeriodId,
+        period_id: periodId,
       });
 
       if (error) {
@@ -197,7 +304,7 @@ export default function Add() {
         note: formData.notes || null,
         expense_date: formData.date,
         user_name: formData.user || null,
-        period_id: currentPeriodId,
+        period_id: periodId,
       });
 
       if (error) {
@@ -206,6 +313,7 @@ export default function Add() {
       }
     }
 
+    setCurrentPeriodId(periodId);
     refreshCurrentPeriodData();
     navigate('/');
   };

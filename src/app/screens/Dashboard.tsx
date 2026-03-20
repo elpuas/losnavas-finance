@@ -12,6 +12,8 @@ type Period = {
 };
 
 type ExpenseRow = {
+  id: string;
+  name: string;
   amount: number;
   type: 'fixed' | 'extra';
 };
@@ -52,6 +54,8 @@ export default function Dashboard() {
   } = useOutletContext<AppLayoutContext>();
   const [periods, setPeriods] = useState<Period[]>([]);
   const [selectedPeriodName, setSelectedPeriodName] = useState('No period selected');
+  const [fixedExpenses, setFixedExpenses] = useState<ExpenseRow[]>([]);
+  const [fixedExpenseDrafts, setFixedExpenseDrafts] = useState<Record<string, string>>({});
   const [totals, setTotals] = useState({
     totalFixed: 0,
     totalExtra: 0,
@@ -107,12 +111,17 @@ export default function Dashboard() {
 
   useEffect(() => {
     async function loadFinancialData() {
-      if (!currentPeriodId) {
+      if (!currentPeriodId || periods.length === 0) {
         return;
       }
 
       const selectedPeriod = periods.find((period) => period.id === currentPeriodId) ?? null;
-      setSelectedPeriodName(selectedPeriod?.name ?? 'No period selected');
+
+      if (!selectedPeriod) {
+        return;
+      }
+
+      setSelectedPeriodName(selectedPeriod.name);
 
       const [
         { data: existingFixedExpenses, error: fixedExpensesError },
@@ -166,7 +175,7 @@ export default function Dashboard() {
 
       const { data: expenses, error: expensesError } = await supabase
         .from('expenses')
-        .select('amount, type')
+        .select('id, name, amount, type')
         .eq('period_id', currentPeriodId);
 
       if (expensesError) {
@@ -176,11 +185,17 @@ export default function Dashboard() {
         return;
       }
 
+      const nextFixedExpenses = (expenses ?? []).filter((expense) => expense.type === 'fixed');
+      setFixedExpenses(nextFixedExpenses);
+      setFixedExpenseDrafts(
+        Object.fromEntries(nextFixedExpenses.map((expense) => [expense.id, String(expense.amount)]))
+      );
+
       const nextTotals = calculateFinancialTotals(expenses ?? [], income ?? []);
       setTotals(nextTotals);
 
       console.log('Financial calculations', {
-        current_period_name: selectedPeriod?.name ?? 'Unknown period',
+        current_period_name: selectedPeriod.name,
         total_fixed: nextTotals.totalFixed,
         total_extra: nextTotals.totalExtra,
         total_income: nextTotals.totalIncome,
@@ -191,6 +206,68 @@ export default function Dashboard() {
 
     loadFinancialData();
   }, [currentPeriodId, periodRefreshCount, periods]);
+
+  async function handleFixedExpenseAmountBlur(expenseId: string) {
+    const expense = fixedExpenses.find((item) => item.id === expenseId);
+
+    if (!expense) {
+      return;
+    }
+
+    const draftValue = fixedExpenseDrafts[expenseId] ?? String(expense.amount);
+    const nextAmount = Number(draftValue);
+
+    if (!Number.isFinite(nextAmount) || nextAmount < 0) {
+      setFixedExpenseDrafts((currentDrafts) => ({
+        ...currentDrafts,
+        [expenseId]: String(expense.amount),
+      }));
+      return;
+    }
+
+    if (nextAmount === expense.amount) {
+      return;
+    }
+
+    const { error } = await supabase
+      .from('expenses')
+      .update({ amount: nextAmount })
+      .eq('id', expenseId);
+
+    if (error) {
+      console.error('Fixed expense update failed', {
+        expenseId,
+        error,
+      });
+      setFixedExpenseDrafts((currentDrafts) => ({
+        ...currentDrafts,
+        [expenseId]: String(expense.amount),
+      }));
+      return;
+    }
+
+    setFixedExpenses((currentExpenses) =>
+      currentExpenses.map((item) =>
+        item.id === expenseId ? { ...item, amount: nextAmount } : item
+      )
+    );
+    setFixedExpenseDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [expenseId]: String(nextAmount),
+    }));
+    setTotals((currentTotals) => {
+      const nextTotalFixed = currentTotals.totalFixed - expense.amount + nextAmount;
+      const nextRemaining =
+        currentTotals.totalIncome - nextTotalFixed - currentTotals.totalExtra;
+
+      return {
+        ...currentTotals,
+        totalFixed: nextTotalFixed,
+        remaining: nextRemaining,
+        split: nextRemaining / 2,
+      };
+    });
+  }
 
   const totalExpenses = totals.totalFixed + totals.totalExtra;
 
@@ -263,6 +340,36 @@ export default function Dashboard() {
           </div>
           <div className="text-xs text-gray-500 mt-1">Extra Expenses</div>
           <div className="text-[10px] text-gray-400 mt-0.5">Optional costs</div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+        <h2 className="font-semibold text-gray-900 mb-4">Fixed Expenses</h2>
+        <div className="space-y-3">
+          {fixedExpenses.map((expense) => (
+            <div key={expense.id} className="flex items-center justify-between gap-4">
+              <span className="text-sm font-medium text-gray-700">{expense.name}</span>
+              <div className="w-32">
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={fixedExpenseDrafts[expense.id] ?? String(expense.amount)}
+                  onChange={(event) =>
+                    setFixedExpenseDrafts((currentDrafts) => ({
+                      ...currentDrafts,
+                      [expense.id]: event.target.value,
+                    }))
+                  }
+                  onBlur={() => handleFixedExpenseAmountBlur(expense.id)}
+                  className="w-full rounded-xl border border-gray-300 bg-gray-50 px-3 py-2 text-right text-sm text-gray-900 outline-none"
+                />
+              </div>
+            </div>
+          ))}
+          {fixedExpenses.length === 0 && (
+            <p className="text-sm text-gray-500">No fixed expenses available for this period.</p>
+          )}
         </div>
       </div>
 
