@@ -6,6 +6,7 @@ import {
   HeartPulse,
   Car,
   Plane,
+  Lightbulb,
   Circle,
   CheckCircle2,
   Calendar,
@@ -22,13 +23,15 @@ const categoryIcons: Record<string, any> = {
   food: UtensilsCrossed,
   health: HeartPulse,
   home: Home,
+  utilities: Lightbulb,
   transport: Car,
   travel: Plane,
   other: Package,
 };
 
 export default function ExpenseItem({ expense, onToggle }: ExpenseItemProps) {
-  const Icon = categoryIcons[expense.category] || Circle;
+  const normalizedCategory = (expense.category ?? 'other').trim().toLowerCase();
+  const Icon = categoryIcons[normalizedCategory] || Package;
   const isExtra = expense.type === 'extra';
 
   const formattedDate = new Date(expense.date).toLocaleDateString('en-US', {

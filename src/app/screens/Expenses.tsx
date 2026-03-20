@@ -1,9 +1,74 @@
-import { useState } from 'react';
-import { mockData } from '../data';
+import { useEffect, useState } from 'react';
+import { useOutletContext } from 'react-router';
 import ExpenseItem from '../components/ExpenseItem';
+import { supabase } from '../../lib/supabase';
+import type { AppLayoutContext } from '../components/Layout';
+import type { Expense } from '../types';
+
+type Period = {
+  id: string;
+  name: string;
+  start_date: string;
+};
 
 export default function Expenses() {
-  const [expenses, setExpenses] = useState(mockData.expenses);
+  const { currentPeriodId, setCurrentPeriodId, periodRefreshCount } =
+    useOutletContext<AppLayoutContext>();
+  const [periods, setPeriods] = useState<Period[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+
+  useEffect(() => {
+    async function loadPeriods() {
+      const { data, error } = await supabase
+        .from('periods')
+        .select('id, name, start_date')
+        .order('start_date', { ascending: false });
+
+      if (error) {
+        console.error('Expenses periods fetch failed', error);
+        return;
+      }
+
+      setPeriods(data ?? []);
+    }
+
+    loadPeriods();
+  }, []);
+
+  useEffect(() => {
+    async function loadExpenses() {
+      if (!currentPeriodId) {
+        setExpenses([]);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('expenses')
+        .select('id, name, amount, type, category, active, expense_date, note')
+        .eq('period_id', currentPeriodId)
+        .order('created_at', { ascending: true });
+
+      if (error) {
+        console.error('Expenses fetch failed', error);
+        return;
+      }
+
+      const nextExpenses = (data ?? []).map((expense) => ({
+        id: expense.id,
+        name: expense.name,
+        amount: expense.amount,
+        type: expense.type,
+        category: expense.category ?? 'other',
+        active: expense.active ?? true,
+        date: expense.expense_date ?? new Date().toISOString().split('T')[0],
+        notes: expense.note ?? undefined,
+      }));
+
+      setExpenses(nextExpenses);
+    }
+
+    loadExpenses();
+  }, [currentPeriodId, periodRefreshCount]);
 
   const toggleExpense = (id: string) => {
     setExpenses((prev) =>
@@ -11,8 +76,9 @@ export default function Expenses() {
     );
   };
 
-  const fixedExpenses = expenses.filter((e) => e.type === 'fixed');
-  const extraExpenses = expenses.filter((e) => e.type === 'extra');
+  const visibleExpenses = expenses.filter((expense) => expense.amount !== 0);
+  const fixedExpenses = visibleExpenses.filter((e) => e.type === 'fixed');
+  const extraExpenses = visibleExpenses.filter((e) => e.type === 'extra');
 
   const totalFixed = fixedExpenses
     .filter((e) => e.active)
@@ -28,6 +94,24 @@ export default function Expenses() {
       <div className="pt-4">
         <h1 className="text-2xl font-bold text-gray-900">Expenses</h1>
         <p className="text-sm text-gray-500 mt-1">Manage your costs</p>
+      </div>
+
+      <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-200">
+        <label htmlFor="expenses-period-selector" className="block text-sm font-medium text-gray-700 mb-2">
+          Select Period
+        </label>
+        <select
+          id="expenses-period-selector"
+          value={currentPeriodId}
+          onChange={(event) => setCurrentPeriodId(event.target.value)}
+          className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none"
+        >
+          {periods.map((period) => (
+            <option key={period.id} value={period.id}>
+              {period.name}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* Summary Card */}
