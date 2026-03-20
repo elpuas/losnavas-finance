@@ -66,7 +66,6 @@ export default function Add() {
         .order('name', { ascending: true });
 
       if (error) {
-        console.error('Transaction templates fetch failed', error);
         return;
       }
 
@@ -120,7 +119,6 @@ export default function Add() {
       .single();
 
     if (error) {
-      console.error('Transaction template insert failed', error);
       return false;
     }
 
@@ -206,7 +204,6 @@ export default function Add() {
       .maybeSingle();
 
     if (periodLookupError) {
-      console.error('Period resolution failed', periodLookupError);
       return null;
     }
 
@@ -228,14 +225,6 @@ export default function Add() {
       return createdPeriod.id;
     }
 
-    if (periodInsertError) {
-      console.error('Period creation failed', {
-        start_date: startDate,
-        end_date: endDate,
-        error: periodInsertError,
-      });
-    }
-
     const { data: retryPeriod, error: retryLookupError } = await supabase
       .from('periods')
       .select('id')
@@ -244,7 +233,6 @@ export default function Add() {
       .maybeSingle();
 
     if (retryLookupError) {
-      console.error('Period resolution retry failed', retryLookupError);
       return null;
     }
 
@@ -257,27 +245,18 @@ export default function Add() {
     const transactionName = resolveTransactionName();
 
     if (!transactionName) {
-      console.error('Add transaction failed', {
-        message: 'Transaction name is required.',
-      });
       return;
     }
 
     const amount = Number(formData.amount);
 
     if (!Number.isFinite(amount)) {
-      console.error('Add transaction failed', {
-        message: 'Amount must be a valid number.',
-      });
       return;
     }
 
     const periodId = await resolvePeriodId(formData.date);
 
     if (!periodId) {
-      console.error('Add transaction failed', {
-        message: 'Unable to resolve a valid period for the selected date.',
-      });
       return;
     }
 
@@ -307,7 +286,6 @@ export default function Add() {
       });
 
       if (error) {
-        console.error('Add transaction failed', error);
         return;
       }
     } else {
@@ -323,7 +301,6 @@ export default function Add() {
       });
 
       if (error) {
-        console.error('Add transaction failed', error);
         return;
       }
     }

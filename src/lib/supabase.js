@@ -10,15 +10,3 @@ if (!supabaseUrl || !supabaseKey) {
 }
 
 export const supabase = createClient(supabaseUrl, supabaseKey)
-
-export async function testPeriodsFetch() {
-  const { data, error } = await supabase.from('periods').select('*')
-
-  if (error) {
-    console.error('Error fetching periods:', error)
-    return null
-  }
-
-  console.log('Periods:', data)
-  return data
-}
