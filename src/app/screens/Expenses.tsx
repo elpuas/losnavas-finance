@@ -4,6 +4,7 @@ import ExpenseItem from '../components/ExpenseItem';
 import { supabase } from '../../lib/supabase';
 import type { AppLayoutContext } from '../components/Layout';
 import type { Expense } from '../types';
+import { formatPeriodRange } from '../utils/periodDisplay';
 
 type Period = {
   id: string;
@@ -25,7 +26,6 @@ export default function Expenses() {
         .order('start_date', { ascending: false });
 
       if (error) {
-        console.error('Expenses periods fetch failed', error);
         return;
       }
 
@@ -49,7 +49,6 @@ export default function Expenses() {
         .order('created_at', { ascending: true });
 
       if (error) {
-        console.error('Expenses fetch failed', error);
         return;
       }
 
@@ -108,7 +107,7 @@ export default function Expenses() {
         >
           {periods.map((period) => (
             <option key={period.id} value={period.id}>
-              {period.name}
+              {formatPeriodRange(period.name)}
             </option>
           ))}
         </select>

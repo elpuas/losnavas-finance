@@ -4,6 +4,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { DollarSign, TrendingUp, TrendingDown, AlertCircle, Users } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import type { AppLayoutContext } from '../components/Layout';
+import { formatPeriodRange } from '../utils/periodDisplay';
 
 type Period = {
   id: string;
@@ -53,9 +54,6 @@ export default function Dashboard() {
     periodRefreshCount,
   } = useOutletContext<AppLayoutContext>();
   const [periods, setPeriods] = useState<Period[]>([]);
-  const [selectedPeriodName, setSelectedPeriodName] = useState('No period selected');
-  const [fixedExpenses, setFixedExpenses] = useState<ExpenseRow[]>([]);
-  const [fixedExpenseDrafts, setFixedExpenseDrafts] = useState<Record<string, string>>({});
   const [totals, setTotals] = useState({
     totalFixed: 0,
     totalExtra: 0,
@@ -72,7 +70,6 @@ export default function Dashboard() {
         .order('start_date', { ascending: false });
 
       if (error) {
-        console.error('Periods fetch failed', error);
         return;
       }
 
@@ -82,16 +79,11 @@ export default function Dashboard() {
       const initialPeriod = fetchedPeriods[0] ?? null;
 
       if (!initialPeriod) {
-        setSelectedPeriodName('No period selected');
-        console.log('Financial calculations', {
-          message: 'No periods found.',
-        });
         return;
       }
 
       if (!currentPeriodId) {
         setCurrentPeriodId(initialPeriod.id);
-        setSelectedPeriodName(initialPeriod.name);
         return;
       }
 
@@ -99,11 +91,7 @@ export default function Dashboard() {
 
       if (!matchingPeriod) {
         setCurrentPeriodId(initialPeriod.id);
-        setSelectedPeriodName(initialPeriod.name);
-        return;
       }
-
-      setSelectedPeriodName(matchingPeriod.name);
     }
 
     loadPeriods();
@@ -120,8 +108,6 @@ export default function Dashboard() {
       if (!selectedPeriod) {
         return;
       }
-
-      setSelectedPeriodName(selectedPeriod.name);
 
       const [
         { data: existingFixedExpenses, error: fixedExpensesError },
@@ -142,15 +128,11 @@ export default function Dashboard() {
       ]);
 
       if (fixedExpensesError || incomeError) {
-        console.error('Financial calculations', {
-          fixedExpensesError,
-          incomeError,
-        });
         return;
       }
 
       if (fixedTemplatesError) {
-        console.error('Auto fixed expenses failed', fixedTemplatesError);
+        return;
       }
 
       if ((existingFixedExpenses?.length ?? 0) === 0 && (fixedExpenseTemplates?.length ?? 0) > 0) {
@@ -166,10 +148,7 @@ export default function Dashboard() {
         const { error: insertError } = await supabase.from('expenses').insert(rowsToInsert);
 
         if (insertError) {
-          console.error('Auto fixed expenses failed', {
-            period_id: currentPeriodId,
-            error: insertError,
-          });
+          return;
         }
       }
 
@@ -179,95 +158,15 @@ export default function Dashboard() {
         .eq('period_id', currentPeriodId);
 
       if (expensesError) {
-        console.error('Financial calculations', {
-          expensesError,
-        });
         return;
       }
 
-      const nextFixedExpenses = (expenses ?? []).filter((expense) => expense.type === 'fixed');
-      setFixedExpenses(nextFixedExpenses);
-      setFixedExpenseDrafts(
-        Object.fromEntries(nextFixedExpenses.map((expense) => [expense.id, String(expense.amount)]))
-      );
-
       const nextTotals = calculateFinancialTotals(expenses ?? [], income ?? []);
       setTotals(nextTotals);
-
-      console.log('Financial calculations', {
-        current_period_name: selectedPeriod.name,
-        total_fixed: nextTotals.totalFixed,
-        total_extra: nextTotals.totalExtra,
-        total_income: nextTotals.totalIncome,
-        remaining: nextTotals.remaining,
-        split: nextTotals.split,
-      });
     }
 
     loadFinancialData();
   }, [currentPeriodId, periodRefreshCount, periods]);
-
-  async function handleFixedExpenseAmountBlur(expenseId: string) {
-    const expense = fixedExpenses.find((item) => item.id === expenseId);
-
-    if (!expense) {
-      return;
-    }
-
-    const draftValue = fixedExpenseDrafts[expenseId] ?? String(expense.amount);
-    const nextAmount = Number(draftValue);
-
-    if (!Number.isFinite(nextAmount) || nextAmount < 0) {
-      setFixedExpenseDrafts((currentDrafts) => ({
-        ...currentDrafts,
-        [expenseId]: String(expense.amount),
-      }));
-      return;
-    }
-
-    if (nextAmount === expense.amount) {
-      return;
-    }
-
-    const { error } = await supabase
-      .from('expenses')
-      .update({ amount: nextAmount })
-      .eq('id', expenseId);
-
-    if (error) {
-      console.error('Fixed expense update failed', {
-        expenseId,
-        error,
-      });
-      setFixedExpenseDrafts((currentDrafts) => ({
-        ...currentDrafts,
-        [expenseId]: String(expense.amount),
-      }));
-      return;
-    }
-
-    setFixedExpenses((currentExpenses) =>
-      currentExpenses.map((item) =>
-        item.id === expenseId ? { ...item, amount: nextAmount } : item
-      )
-    );
-    setFixedExpenseDrafts((currentDrafts) => ({
-      ...currentDrafts,
-      [expenseId]: String(nextAmount),
-    }));
-    setTotals((currentTotals) => {
-      const nextTotalFixed = currentTotals.totalFixed - expense.amount + nextAmount;
-      const nextRemaining =
-        currentTotals.totalIncome - nextTotalFixed - currentTotals.totalExtra;
-
-      return {
-        ...currentTotals,
-        totalFixed: nextTotalFixed,
-        remaining: nextRemaining,
-        split: nextRemaining / 2,
-      };
-    });
-  }
 
   const totalExpenses = totals.totalFixed + totals.totalExtra;
 
@@ -280,8 +179,7 @@ export default function Dashboard() {
     <div className="p-4 space-y-4">
       {/* Header */}
       <div className="pt-4">
-        <h1 className="text-2xl font-bold text-gray-900">Family Finance</h1>
-        <p className="text-sm text-gray-500 mt-1">{selectedPeriodName}</p>
+        <h1 className="text-2xl font-bold text-gray-900">The Navas Finance</h1>
       </div>
 
       <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-200">
@@ -296,7 +194,7 @@ export default function Dashboard() {
         >
           {periods.map((period) => (
             <option key={period.id} value={period.id}>
-              {period.name}
+              {formatPeriodRange(period.name)}
             </option>
           ))}
         </select>
@@ -340,36 +238,6 @@ export default function Dashboard() {
           </div>
           <div className="text-xs text-gray-500 mt-1">Extra Expenses</div>
           <div className="text-[10px] text-gray-400 mt-0.5">Optional costs</div>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-        <h2 className="font-semibold text-gray-900 mb-4">Fixed Expenses</h2>
-        <div className="space-y-3">
-          {fixedExpenses.map((expense) => (
-            <div key={expense.id} className="flex items-center justify-between gap-4">
-              <span className="text-sm font-medium text-gray-700">{expense.name}</span>
-              <div className="w-32">
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={fixedExpenseDrafts[expense.id] ?? String(expense.amount)}
-                  onChange={(event) =>
-                    setFixedExpenseDrafts((currentDrafts) => ({
-                      ...currentDrafts,
-                      [expense.id]: event.target.value,
-                    }))
-                  }
-                  onBlur={() => handleFixedExpenseAmountBlur(expense.id)}
-                  className="w-full rounded-xl border border-gray-300 bg-gray-50 px-3 py-2 text-right text-sm text-gray-900 outline-none"
-                />
-              </div>
-            </div>
-          ))}
-          {fixedExpenses.length === 0 && (
-            <p className="text-sm text-gray-500">No fixed expenses available for this period.</p>
-          )}
         </div>
       </div>
 

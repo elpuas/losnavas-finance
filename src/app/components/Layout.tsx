@@ -37,7 +37,6 @@ export default function Layout() {
         .maybeSingle();
 
       if (error) {
-        console.error('Current period initialization failed', error);
         return;
       }
 
