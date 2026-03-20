@@ -20,6 +20,11 @@ type IncomeRow = {
   amount: number;
 };
 
+type FixedExpenseTemplateRow = {
+  name: string;
+  user_name: string | null;
+};
+
 function calculateFinancialTotals(expenses: ExpenseRow[], income: IncomeRow[]) {
   const fixedExpenses = expenses.filter((expense) => expense.type === 'fixed');
   const extraExpenses = expenses.filter((expense) => expense.type === 'extra');
@@ -109,16 +114,64 @@ export default function Dashboard() {
       const selectedPeriod = periods.find((period) => period.id === currentPeriodId) ?? null;
       setSelectedPeriodName(selectedPeriod?.name ?? 'No period selected');
 
-      const [{ data: expenses, error: expensesError }, { data: income, error: incomeError }] =
-        await Promise.all([
-          supabase.from('expenses').select('amount, type').eq('period_id', currentPeriodId),
-          supabase.from('income').select('amount').eq('period_id', currentPeriodId),
-        ]);
+      const [
+        { data: existingFixedExpenses, error: fixedExpensesError },
+        { data: fixedExpenseTemplates, error: fixedTemplatesError },
+        { data: income, error: incomeError },
+      ] = await Promise.all([
+        supabase
+          .from('expenses')
+          .select('id')
+          .eq('period_id', currentPeriodId)
+          .eq('type', 'fixed'),
+        supabase
+          .from('transaction_templates')
+          .select('name, user_name')
+          .eq('type', 'expense')
+          .eq('subtype', 'fixed'),
+        supabase.from('income').select('amount').eq('period_id', currentPeriodId),
+      ]);
 
-      if (expensesError || incomeError) {
+      if (fixedExpensesError || incomeError) {
+        console.error('Financial calculations', {
+          fixedExpensesError,
+          incomeError,
+        });
+        return;
+      }
+
+      if (fixedTemplatesError) {
+        console.error('Auto fixed expenses failed', fixedTemplatesError);
+      }
+
+      if ((existingFixedExpenses?.length ?? 0) === 0 && (fixedExpenseTemplates?.length ?? 0) > 0) {
+        const rowsToInsert = (fixedExpenseTemplates as FixedExpenseTemplateRow[]).map((template) => ({
+          name: template.name,
+          type: 'fixed',
+          category: 'general',
+          period_id: currentPeriodId,
+          amount: 0,
+          user_name: template.user_name,
+        }));
+
+        const { error: insertError } = await supabase.from('expenses').insert(rowsToInsert);
+
+        if (insertError) {
+          console.error('Auto fixed expenses failed', {
+            period_id: currentPeriodId,
+            error: insertError,
+          });
+        }
+      }
+
+      const { data: expenses, error: expensesError } = await supabase
+        .from('expenses')
+        .select('amount, type')
+        .eq('period_id', currentPeriodId);
+
+      if (expensesError) {
         console.error('Financial calculations', {
           expensesError,
-          incomeError,
         });
         return;
       }
