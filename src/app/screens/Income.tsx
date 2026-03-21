@@ -3,6 +3,7 @@ import { useOutletContext } from 'react-router';
 import IncomeItem from '../components/IncomeItem';
 import { supabase } from '../../lib/supabase';
 import type { AppLayoutContext } from '../components/Layout';
+import { ValueSkeleton } from '../components/ScreenSkeletons';
 import type { Income } from '../types';
 import { formatPeriodRange } from '../utils/periodDisplay';
 
@@ -17,57 +18,87 @@ export default function Income() {
     useOutletContext<AppLayoutContext>();
   const [periods, setPeriods] = useState<Period[]>([]);
   const [income, setIncome] = useState<Income[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [arePeriodsLoaded, setArePeriodsLoaded] = useState(false);
+  const [hasLoadedInitialData, setHasLoadedInitialData] = useState(false);
 
   useEffect(() => {
     async function loadPeriods() {
-      const { data, error } = await supabase
-        .from('periods')
-        .select('id, name, start_date')
-        .order('start_date', { ascending: false });
+      try {
+        const { data, error } = await supabase
+          .from('periods')
+          .select('id, name, start_date')
+          .order('start_date', { ascending: false });
 
-      if (error) {
-        return;
+        if (error) {
+          if (!hasLoadedInitialData) {
+            setHasLoadedInitialData(true);
+            setIsLoading(false);
+          }
+          return;
+        }
+
+        setPeriods(data ?? []);
+      } finally {
+        setArePeriodsLoaded(true);
       }
-
-      setPeriods(data ?? []);
     }
 
     loadPeriods();
-  }, []);
+  }, [hasLoadedInitialData]);
 
   useEffect(() => {
+    if (!arePeriodsLoaded) {
+      return;
+    }
+
     async function loadIncome() {
       if (!currentPeriodId) {
-        setIncome([]);
+        if (periods.length === 0 && !hasLoadedInitialData) {
+          setIncome([]);
+          setHasLoadedInitialData(true);
+          setIsLoading(false);
+        }
         return;
       }
 
-      const { data, error } = await supabase
-        .from('income')
-        .select('id, name, amount, user_name, income_date')
-        .eq('period_id', currentPeriodId)
-        .order('created_at', { ascending: true });
-
-      if (error) {
-        return;
+      if (!hasLoadedInitialData) {
+        setIsLoading(true);
       }
 
-      const nextIncome = (data ?? []).map((entry) => ({
-        id: entry.id,
-        name: entry.name,
-        amount: entry.amount,
-        user:
-          entry.user_name === 'Alfredo' || entry.user_name === 'Cata'
-            ? entry.user_name
-            : undefined,
-        date: entry.income_date ?? new Date().toISOString().split('T')[0],
-      }));
+      try {
+        const { data, error } = await supabase
+          .from('income')
+          .select('id, name, amount, user_name, income_date')
+          .eq('period_id', currentPeriodId)
+          .order('created_at', { ascending: true });
 
-      setIncome(nextIncome);
+        if (error) {
+          return;
+        }
+
+        const nextIncome = (data ?? []).map((entry) => ({
+          id: entry.id,
+          name: entry.name,
+          amount: entry.amount,
+          user:
+            entry.user_name === 'Alfredo' || entry.user_name === 'Cata'
+              ? entry.user_name
+              : undefined,
+          date: entry.income_date ?? new Date().toISOString().split('T')[0],
+        }));
+
+        setIncome(nextIncome);
+      } finally {
+        if (!hasLoadedInitialData) {
+          setHasLoadedInitialData(true);
+          setIsLoading(false);
+        }
+      }
     }
 
     loadIncome();
-  }, [currentPeriodId, periodRefreshCount]);
+  }, [arePeriodsLoaded, currentPeriodId, hasLoadedInitialData, periodRefreshCount, periods.length]);
 
   const totalIncome = income.reduce((sum, i) => sum + i.amount, 0);
   const alfredoIncome = income
@@ -107,19 +138,23 @@ export default function Income() {
       <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-2xl p-6 text-white shadow-lg">
         <div className="text-sm opacity-90 mb-2">Total Income</div>
         <div className="text-4xl font-bold mb-4">
-          ${totalIncome.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+          {isLoading ? (
+            <ValueSkeleton className="h-10 w-36 bg-white/30" />
+          ) : (
+            `$${totalIncome.toLocaleString('en-US', { minimumFractionDigits: 2 })}`
+          )}
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div className="bg-white/20 rounded-xl p-3 backdrop-blur-sm">
             <div className="text-xs opacity-90 mb-1">Alfredo</div>
             <div className="text-lg font-bold">
-              ${alfredoIncome.toLocaleString('en-US')}
+              {isLoading ? <ValueSkeleton className="h-7 w-20 bg-white/30" /> : `$${alfredoIncome.toLocaleString('en-US')}`}
             </div>
           </div>
           <div className="bg-white/20 rounded-xl p-3 backdrop-blur-sm">
             <div className="text-xs opacity-90 mb-1">Cata</div>
             <div className="text-lg font-bold">
-              ${cataIncome.toLocaleString('en-US')}
+              {isLoading ? <ValueSkeleton className="h-7 w-20 bg-white/30" /> : `$${cataIncome.toLocaleString('en-US')}`}
             </div>
           </div>
         </div>
@@ -130,7 +165,7 @@ export default function Income() {
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-semibold text-gray-900">Income Sources</h2>
           <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-medium">
-            {income.length} sources
+            {isLoading ? <ValueSkeleton className="h-3 w-14" /> : `${income.length} sources`}
           </span>
         </div>
         <div className="space-y-2">

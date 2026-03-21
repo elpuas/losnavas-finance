@@ -4,6 +4,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { DollarSign, TrendingUp, TrendingDown, AlertCircle, Users } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import type { AppLayoutContext } from '../components/Layout';
+import { ValueSkeleton } from '../components/ScreenSkeletons';
 import { formatPeriodRange } from '../utils/periodDisplay';
 
 type Period = {
@@ -54,6 +55,9 @@ export default function Dashboard() {
     periodRefreshCount,
   } = useOutletContext<AppLayoutContext>();
   const [periods, setPeriods] = useState<Period[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [arePeriodsLoaded, setArePeriodsLoaded] = useState(false);
+  const [hasLoadedInitialData, setHasLoadedInitialData] = useState(false);
   const [totals, setTotals] = useState({
     totalFixed: 0,
     totalExtra: 0,
@@ -64,109 +68,138 @@ export default function Dashboard() {
 
   useEffect(() => {
     async function loadPeriods() {
-      const { data, error } = await supabase
-        .from('periods')
-        .select('id, name, start_date')
-        .order('start_date', { ascending: false });
+      try {
+        const { data, error } = await supabase
+          .from('periods')
+          .select('id, name, start_date')
+          .order('start_date', { ascending: false });
 
-      if (error) {
-        return;
-      }
+        if (error) {
+          if (!hasLoadedInitialData) {
+            setHasLoadedInitialData(true);
+            setIsLoading(false);
+          }
+          return;
+        }
 
-      const fetchedPeriods = data ?? [];
-      setPeriods(fetchedPeriods);
+        const fetchedPeriods = data ?? [];
+        setPeriods(fetchedPeriods);
 
-      const initialPeriod = fetchedPeriods[0] ?? null;
+        const initialPeriod = fetchedPeriods[0] ?? null;
 
-      if (!initialPeriod) {
-        return;
-      }
+        if (!initialPeriod) {
+          if (!hasLoadedInitialData) {
+            setHasLoadedInitialData(true);
+            setIsLoading(false);
+          }
+          return;
+        }
 
-      if (!currentPeriodId) {
-        setCurrentPeriodId(initialPeriod.id);
-        return;
-      }
+        if (!currentPeriodId) {
+          setCurrentPeriodId(initialPeriod.id);
+          return;
+        }
 
-      const matchingPeriod = fetchedPeriods.find((period) => period.id === currentPeriodId) ?? null;
+        const matchingPeriod = fetchedPeriods.find((period) => period.id === currentPeriodId) ?? null;
 
-      if (!matchingPeriod) {
-        setCurrentPeriodId(initialPeriod.id);
+        if (!matchingPeriod) {
+          setCurrentPeriodId(initialPeriod.id);
+        }
+      } finally {
+        setArePeriodsLoaded(true);
       }
     }
 
     loadPeriods();
-  }, [currentPeriodId, setCurrentPeriodId]);
+  }, [currentPeriodId, hasLoadedInitialData, setCurrentPeriodId]);
 
   useEffect(() => {
+    if (!arePeriodsLoaded) {
+      return;
+    }
+
     async function loadFinancialData() {
       if (!currentPeriodId || periods.length === 0) {
+        if (!currentPeriodId && periods.length === 0 && !hasLoadedInitialData) {
+          setHasLoadedInitialData(true);
+          setIsLoading(false);
+        }
         return;
       }
 
-      const selectedPeriod = periods.find((period) => period.id === currentPeriodId) ?? null;
-
-      if (!selectedPeriod) {
+      if (!periods.some((period) => period.id === currentPeriodId)) {
         return;
       }
 
-      const [
-        { data: existingFixedExpenses, error: fixedExpensesError },
-        { data: fixedExpenseTemplates, error: fixedTemplatesError },
-        { data: income, error: incomeError },
-      ] = await Promise.all([
-        supabase
-          .from('expenses')
-          .select('id')
-          .eq('period_id', currentPeriodId)
-          .eq('type', 'fixed'),
-        supabase
-          .from('transaction_templates')
-          .select('name, user_name')
-          .eq('type', 'expense')
-          .eq('subtype', 'fixed'),
-        supabase.from('income').select('amount').eq('period_id', currentPeriodId),
-      ]);
-
-      if (fixedExpensesError || incomeError) {
-        return;
+      if (!hasLoadedInitialData) {
+        setIsLoading(true);
       }
 
-      if (fixedTemplatesError) {
-        return;
-      }
+      try {
+        const [
+          { data: existingFixedExpenses, error: fixedExpensesError },
+          { data: fixedExpenseTemplates, error: fixedTemplatesError },
+          { data: income, error: incomeError },
+        ] = await Promise.all([
+          supabase
+            .from('expenses')
+            .select('id')
+            .eq('period_id', currentPeriodId)
+            .eq('type', 'fixed'),
+          supabase
+            .from('transaction_templates')
+            .select('name, user_name')
+            .eq('type', 'expense')
+            .eq('subtype', 'fixed'),
+          supabase.from('income').select('amount').eq('period_id', currentPeriodId),
+        ]);
 
-      if ((existingFixedExpenses?.length ?? 0) === 0 && (fixedExpenseTemplates?.length ?? 0) > 0) {
-        const rowsToInsert = (fixedExpenseTemplates as FixedExpenseTemplateRow[]).map((template) => ({
-          name: template.name,
-          type: 'fixed',
-          category: 'general',
-          period_id: currentPeriodId,
-          amount: 0,
-          user_name: template.user_name,
-        }));
-
-        const { error: insertError } = await supabase.from('expenses').insert(rowsToInsert);
-
-        if (insertError) {
+        if (fixedExpensesError || incomeError) {
           return;
         }
+
+        if (fixedTemplatesError) {
+          return;
+        }
+
+        if ((existingFixedExpenses?.length ?? 0) === 0 && (fixedExpenseTemplates?.length ?? 0) > 0) {
+          const rowsToInsert = (fixedExpenseTemplates as FixedExpenseTemplateRow[]).map((template) => ({
+            name: template.name,
+            type: 'fixed',
+            category: 'general',
+            period_id: currentPeriodId,
+            amount: 0,
+            user_name: template.user_name,
+          }));
+
+          const { error: insertError } = await supabase.from('expenses').insert(rowsToInsert);
+
+          if (insertError) {
+            return;
+          }
+        }
+
+        const { data: expenses, error: expensesError } = await supabase
+          .from('expenses')
+          .select('id, name, amount, type')
+          .eq('period_id', currentPeriodId);
+
+        if (expensesError) {
+          return;
+        }
+
+        const nextTotals = calculateFinancialTotals(expenses ?? [], income ?? []);
+        setTotals(nextTotals);
+      } finally {
+        if (!hasLoadedInitialData) {
+          setHasLoadedInitialData(true);
+          setIsLoading(false);
+        }
       }
-
-      const { data: expenses, error: expensesError } = await supabase
-        .from('expenses')
-        .select('id, name, amount, type')
-        .eq('period_id', currentPeriodId);
-
-      if (expensesError) {
-        return;
-      }
-
-      const nextTotals = calculateFinancialTotals(expenses ?? [], income ?? []);
-      setTotals(nextTotals);
     }
 
     loadFinancialData();
-  }, [currentPeriodId, periodRefreshCount, periods]);
+  }, [arePeriodsLoaded, currentPeriodId, hasLoadedInitialData, periodRefreshCount, periods]);
 
   const totalExpenses = totals.totalFixed + totals.totalExtra;
 
@@ -207,7 +240,11 @@ export default function Dashboard() {
           <TrendingUp className="w-5 h-5 opacity-90" />
         </div>
         <div className="text-4xl font-bold mb-1">
-          ${totals.totalIncome.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+          {isLoading ? (
+            <ValueSkeleton className="h-10 w-36 bg-white/30" />
+          ) : (
+            `$${totals.totalIncome.toLocaleString('en-US', { minimumFractionDigits: 2 })}`
+          )}
         </div>
         <div className="text-sm opacity-90">Income for selected period</div>
       </div>
@@ -221,7 +258,11 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="text-2xl font-bold text-gray-900">
-            ${totals.totalFixed.toLocaleString('en-US')}
+            {isLoading ? (
+              <ValueSkeleton className="h-8 w-24" />
+            ) : (
+              `$${totals.totalFixed.toLocaleString('en-US')}`
+            )}
           </div>
           <div className="text-xs text-gray-500 mt-1">Fixed Expenses</div>
           <div className="text-[10px] text-gray-400 mt-0.5">Mandatory costs</div>
@@ -234,7 +275,11 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="text-2xl font-bold text-orange-600">
-            ${totals.totalExtra.toLocaleString('en-US')}
+            {isLoading ? (
+              <ValueSkeleton className="h-8 w-24" />
+            ) : (
+              `$${totals.totalExtra.toLocaleString('en-US')}`
+            )}
           </div>
           <div className="text-xs text-gray-500 mt-1">Extra Expenses</div>
           <div className="text-[10px] text-gray-400 mt-0.5">Optional costs</div>
@@ -271,7 +316,12 @@ export default function Dashboard() {
                 style={{ backgroundColor: entry.color }}
               />
               <span className="text-sm text-gray-600">
-                {entry.name}: ${entry.value.toLocaleString('en-US')}
+                {entry.name}:{' '}
+                {isLoading ? (
+                  <ValueSkeleton className="h-4 w-16" />
+                ) : (
+                  `$${entry.value.toLocaleString('en-US')}`
+                )}
               </span>
             </div>
           ))}
@@ -285,10 +335,18 @@ export default function Dashboard() {
           <TrendingDown className="w-5 h-5 opacity-90" />
         </div>
         <div className="text-4xl font-bold mb-1">
-          ${totals.remaining.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+          {isLoading ? (
+            <ValueSkeleton className="h-10 w-36 bg-white/30" />
+          ) : (
+            `$${totals.remaining.toLocaleString('en-US', { minimumFractionDigits: 2 })}`
+          )}
         </div>
         <div className="text-sm opacity-90">
-          After ${totalExpenses.toLocaleString('en-US')} in expenses
+          {isLoading ? (
+            <ValueSkeleton className="h-4 w-40 bg-white/30" />
+          ) : (
+            `After $${totalExpenses.toLocaleString('en-US')} in expenses`
+          )}
         </div>
       </div>
 
@@ -301,20 +359,32 @@ export default function Dashboard() {
         <div className="text-center mb-4">
           <div className="text-sm text-gray-500 mb-1">Each person receives</div>
           <div className="text-3xl font-bold text-blue-600">
-            ${totals.split.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+            {isLoading ? (
+              <ValueSkeleton className="h-9 w-32" />
+            ) : (
+              `$${totals.split.toLocaleString('en-US', { minimumFractionDigits: 2 })}`
+            )}
           </div>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div className="bg-blue-50 rounded-xl p-4 text-center">
             <div className="text-sm text-blue-600 mb-1">Alfredo</div>
             <div className="text-xl font-bold text-blue-700">
-              ${totals.split.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              {isLoading ? (
+                <ValueSkeleton className="h-7 w-24" />
+              ) : (
+                `$${totals.split.toLocaleString('en-US', { minimumFractionDigits: 2 })}`
+              )}
             </div>
           </div>
           <div className="bg-pink-50 rounded-xl p-4 text-center">
             <div className="text-sm text-pink-600 mb-1">Cata</div>
             <div className="text-xl font-bold text-pink-700">
-              ${totals.split.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              {isLoading ? (
+                <ValueSkeleton className="h-7 w-24" />
+              ) : (
+                `$${totals.split.toLocaleString('en-US', { minimumFractionDigits: 2 })}`
+              )}
             </div>
           </div>
         </div>
@@ -327,26 +397,26 @@ export default function Dashboard() {
           <div className="flex justify-between items-center">
             <span className="text-sm text-gray-600">Income</span>
             <span className="text-sm font-semibold text-green-600">
-              ${totals.totalIncome.toLocaleString('en-US')}
+              {isLoading ? <ValueSkeleton className="h-4 w-16" /> : `$${totals.totalIncome.toLocaleString('en-US')}`}
             </span>
           </div>
           <div className="flex justify-between items-center">
             <span className="text-sm text-gray-600">Fixed Expenses</span>
             <span className="text-sm font-semibold text-gray-700">
-              -${totals.totalFixed.toLocaleString('en-US')}
+              {isLoading ? <ValueSkeleton className="h-4 w-16" /> : `-$${totals.totalFixed.toLocaleString('en-US')}`}
             </span>
           </div>
           <div className="flex justify-between items-center">
             <span className="text-sm text-gray-600">Extra Expenses</span>
             <span className="text-sm font-semibold text-orange-600">
-              -${totals.totalExtra.toLocaleString('en-US')}
+              {isLoading ? <ValueSkeleton className="h-4 w-16" /> : `-$${totals.totalExtra.toLocaleString('en-US')}`}
             </span>
           </div>
           <div className="h-px bg-gray-300 my-2"></div>
           <div className="flex justify-between items-center">
             <span className="text-sm font-semibold text-gray-900">Balance</span>
             <span className="text-sm font-bold text-blue-600">
-              ${totals.remaining.toLocaleString('en-US')}
+              {isLoading ? <ValueSkeleton className="h-4 w-16" /> : `$${totals.remaining.toLocaleString('en-US')}`}
             </span>
           </div>
         </div>
