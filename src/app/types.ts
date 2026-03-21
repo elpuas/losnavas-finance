@@ -20,8 +20,3 @@ export interface Expense {
   date: string;
   notes?: string;
 }
-
-export interface FinanceData {
-  income: Income[];
-  expenses: Expense[];
-}
