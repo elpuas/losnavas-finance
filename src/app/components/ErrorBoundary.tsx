@@ -1,8 +1,7 @@
-import { useRouteError, useNavigate } from 'react-router';
+import { useNavigate } from 'react-router';
 import { AlertCircle, Home } from 'lucide-react';
 
 export default function ErrorBoundary() {
-  const error = useRouteError() as any;
   const navigate = useNavigate();
 
   return (
@@ -17,7 +16,7 @@ export default function ErrorBoundary() {
         </h1>
         
         <p className="text-gray-600 mb-6">
-          {error?.statusText || error?.message || "An unexpected error occurred"}
+          An unexpected error occurred. Please try again.
         </p>
         
         <button

@@ -2,7 +2,7 @@ import { FormEvent, ReactNode, useEffect, useState } from 'react';
 import { Home } from 'lucide-react';
 
 const ACCESS_STORAGE_KEY = 'navas_access';
-const accessPhrase = import.meta.env.LOS_NAVAS_APP_ACCESS?.trim() ?? '';
+const accessPhrase = import.meta.env.VITE_LOS_NAVAS_APP_ACCESS?.trim() ?? '';
 
 type AccessGateProps = {
   children: ReactNode;
