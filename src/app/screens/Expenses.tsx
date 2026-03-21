@@ -3,6 +3,7 @@ import { useOutletContext } from 'react-router';
 import ExpenseItem from '../components/ExpenseItem';
 import { supabase } from '../../lib/supabase';
 import type { AppLayoutContext } from '../components/Layout';
+import { ValueSkeleton } from '../components/ScreenSkeletons';
 import type { Expense } from '../types';
 import { formatPeriodRange } from '../utils/periodDisplay';
 
@@ -17,57 +18,87 @@ export default function Expenses() {
     useOutletContext<AppLayoutContext>();
   const [periods, setPeriods] = useState<Period[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [arePeriodsLoaded, setArePeriodsLoaded] = useState(false);
+  const [hasLoadedInitialData, setHasLoadedInitialData] = useState(false);
 
   useEffect(() => {
     async function loadPeriods() {
-      const { data, error } = await supabase
-        .from('periods')
-        .select('id, name, start_date')
-        .order('start_date', { ascending: false });
+      try {
+        const { data, error } = await supabase
+          .from('periods')
+          .select('id, name, start_date')
+          .order('start_date', { ascending: false });
 
-      if (error) {
-        return;
+        if (error) {
+          if (!hasLoadedInitialData) {
+            setHasLoadedInitialData(true);
+            setIsLoading(false);
+          }
+          return;
+        }
+
+        setPeriods(data ?? []);
+      } finally {
+        setArePeriodsLoaded(true);
       }
-
-      setPeriods(data ?? []);
     }
 
     loadPeriods();
-  }, []);
+  }, [hasLoadedInitialData]);
 
   useEffect(() => {
+    if (!arePeriodsLoaded) {
+      return;
+    }
+
     async function loadExpenses() {
       if (!currentPeriodId) {
-        setExpenses([]);
+        if (periods.length === 0 && !hasLoadedInitialData) {
+          setExpenses([]);
+          setHasLoadedInitialData(true);
+          setIsLoading(false);
+        }
         return;
       }
 
-      const { data, error } = await supabase
-        .from('expenses')
-        .select('id, name, amount, type, category, active, expense_date, note')
-        .eq('period_id', currentPeriodId)
-        .order('created_at', { ascending: true });
-
-      if (error) {
-        return;
+      if (!hasLoadedInitialData) {
+        setIsLoading(true);
       }
 
-      const nextExpenses = (data ?? []).map((expense) => ({
-        id: expense.id,
-        name: expense.name,
-        amount: expense.amount,
-        type: expense.type,
-        category: expense.category ?? 'other',
-        active: expense.active ?? true,
-        date: expense.expense_date ?? new Date().toISOString().split('T')[0],
-        notes: expense.note ?? undefined,
-      }));
+      try {
+        const { data, error } = await supabase
+          .from('expenses')
+          .select('id, name, amount, type, category, active, expense_date, note')
+          .eq('period_id', currentPeriodId)
+          .order('created_at', { ascending: true });
 
-      setExpenses(nextExpenses);
+        if (error) {
+          return;
+        }
+
+        const nextExpenses = (data ?? []).map((expense) => ({
+          id: expense.id,
+          name: expense.name,
+          amount: expense.amount,
+          type: expense.type,
+          category: expense.category ?? 'other',
+          active: expense.active ?? true,
+          date: expense.expense_date ?? new Date().toISOString().split('T')[0],
+          notes: expense.note ?? undefined,
+        }));
+
+        setExpenses(nextExpenses);
+      } finally {
+        if (!hasLoadedInitialData) {
+          setHasLoadedInitialData(true);
+          setIsLoading(false);
+        }
+      }
     }
 
     loadExpenses();
-  }, [currentPeriodId, periodRefreshCount]);
+  }, [arePeriodsLoaded, currentPeriodId, hasLoadedInitialData, periodRefreshCount, periods.length]);
 
   const toggleExpense = (id: string) => {
     setExpenses((prev) =>
@@ -119,19 +150,19 @@ export default function Expenses() {
           <div>
             <div className="text-xs text-gray-500 mb-1">Fixed</div>
             <div className="text-lg font-bold text-gray-700">
-              ${totalFixed.toLocaleString('en-US')}
+              {isLoading ? <ValueSkeleton className="h-7 w-16" /> : `$${totalFixed.toLocaleString('en-US')}`}
             </div>
           </div>
           <div>
             <div className="text-xs text-gray-500 mb-1">Extra</div>
             <div className="text-lg font-bold text-orange-600">
-              ${totalExtra.toLocaleString('en-US')}
+              {isLoading ? <ValueSkeleton className="h-7 w-16" /> : `$${totalExtra.toLocaleString('en-US')}`}
             </div>
           </div>
           <div>
             <div className="text-xs text-gray-500 mb-1">Total</div>
             <div className="text-lg font-bold text-red-600">
-              ${totalExpenses.toLocaleString('en-US')}
+              {isLoading ? <ValueSkeleton className="h-7 w-16" /> : `$${totalExpenses.toLocaleString('en-US')}`}
             </div>
           </div>
         </div>
@@ -142,7 +173,7 @@ export default function Expenses() {
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-semibold text-gray-900">Fixed Expenses</h2>
           <span className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded-full font-medium">
-            {fixedExpenses.filter((e) => e.active).length} active
+            {isLoading ? <ValueSkeleton className="h-3 w-14" /> : `${fixedExpenses.filter((e) => e.active).length} active`}
           </span>
         </div>
         <p className="text-xs text-gray-500 mb-4">Mandatory recurring costs</p>
@@ -161,7 +192,7 @@ export default function Expenses() {
               Fixed Total
             </span>
             <span className="text-lg font-bold text-gray-900">
-              ${totalFixed.toLocaleString('en-US')}
+              {isLoading ? <ValueSkeleton className="h-7 w-16" /> : `$${totalFixed.toLocaleString('en-US')}`}
             </span>
           </div>
         </div>
@@ -172,7 +203,7 @@ export default function Expenses() {
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-semibold text-gray-900">Extra Expenses</h2>
           <span className="text-xs bg-orange-200 text-orange-700 px-2 py-1 rounded-full font-medium">
-            {extraExpenses.filter((e) => e.active).length} active
+            {isLoading ? <ValueSkeleton className="h-3 w-14" /> : `${extraExpenses.filter((e) => e.active).length} active`}
           </span>
         </div>
         <p className="text-xs text-orange-700 mb-4">Optional or unexpected costs</p>
@@ -198,7 +229,7 @@ export default function Expenses() {
                 Extra Total
               </span>
               <span className="text-lg font-bold text-orange-700">
-                ${totalExtra.toLocaleString('en-US')}
+                {isLoading ? <ValueSkeleton className="h-7 w-16" /> : `$${totalExtra.toLocaleString('en-US')}`}
               </span>
             </div>
           </div>
