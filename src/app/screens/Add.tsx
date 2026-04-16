@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useOutletContext } from 'react-router';
 import { User, ExpenseType } from '../types';
 import type { AppLayoutContext } from '../components/Layout';
@@ -47,6 +47,8 @@ export default function Add() {
   const [templates, setTemplates] = useState<TransactionTemplate[]>([]);
   const [selectedIncomeTemplateId, setSelectedIncomeTemplateId] = useState(ADD_NEW_TEMPLATE);
   const [selectedFixedTemplateId, setSelectedFixedTemplateId] = useState(ADD_NEW_TEMPLATE);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const isSubmittingRef = useRef(false);
 
   const categories = [
     { value: 'education', label: 'Education', icon: GraduationCap },
@@ -242,6 +244,10 @@ export default function Add() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (isSubmittingRef.current) {
+      return;
+    }
+
     const transactionName = resolveTransactionName();
 
     if (!transactionName) {
@@ -254,60 +260,72 @@ export default function Add() {
       return;
     }
 
-    const periodId = await resolvePeriodId(formData.date);
+    isSubmittingRef.current = true;
+    setIsSubmitting(true);
 
-    if (!periodId) {
-      return;
-    }
+    try {
+      const periodId = await resolvePeriodId(formData.date);
 
-    if (type === 'income' && selectedIncomeTemplateId === ADD_NEW_TEMPLATE) {
-      const templateCreated = await createTemplate(transactionName, 'income', null);
-
-      if (!templateCreated) {
+      if (!periodId) {
         return;
       }
-    }
 
-    if (type === 'expense' && formData.expenseType === 'fixed' && selectedFixedTemplateId === ADD_NEW_TEMPLATE) {
-      const templateCreated = await createTemplate(transactionName, 'expense', 'fixed');
+      if (type === 'income' && selectedIncomeTemplateId === ADD_NEW_TEMPLATE) {
+        const templateCreated = await createTemplate(transactionName, 'income', null);
 
-      if (!templateCreated) {
-        return;
+        if (!templateCreated) {
+          return;
+        }
       }
-    }
 
-    if (type === 'income') {
-      const { error } = await supabase.from('income').insert({
-        name: transactionName,
-        amount,
-        user_name: formData.user || null,
-        income_date: formData.date,
-        period_id: periodId,
-      });
+      if (
+        type === 'expense' &&
+        formData.expenseType === 'fixed' &&
+        selectedFixedTemplateId === ADD_NEW_TEMPLATE
+      ) {
+        const templateCreated = await createTemplate(transactionName, 'expense', 'fixed');
 
-      if (error) {
-        return;
+        if (!templateCreated) {
+          return;
+        }
       }
-    } else {
-      const { error } = await supabase.from('expenses').insert({
-        name: transactionName,
-        amount,
-        category: formData.category,
-        type: formData.expenseType,
-        note: formData.notes || null,
-        expense_date: formData.date,
-        user_name: formData.user || null,
-        period_id: periodId,
-      });
 
-      if (error) {
-        return;
+      if (type === 'income') {
+        const { error } = await supabase.from('income').insert({
+          name: transactionName,
+          amount,
+          user_name: formData.user || null,
+          income_date: formData.date,
+          period_id: periodId,
+        });
+
+        if (error) {
+          return;
+        }
+      } else {
+        const { error } = await supabase.from('expenses').insert({
+          name: transactionName,
+          amount,
+          category: formData.category,
+          type: formData.expenseType,
+          note: formData.notes || null,
+          expense_date: formData.date,
+          user_name: formData.user || null,
+          period_id: periodId,
+        });
+
+        if (error) {
+          return;
+        }
       }
-    }
 
-    setCurrentPeriodId(periodId);
-    refreshCurrentPeriodData();
-    navigate('/');
+      setCurrentPeriodId(periodId);
+      refreshCurrentPeriodData();
+      navigate('/');
+    } finally {
+      isSubmittingRef.current = false;
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -610,10 +628,12 @@ export default function Add() {
         {/* Submit Button */}
         <button
           type="submit"
-          className="w-full py-4 bg-blue-500 text-white font-semibold rounded-2xl shadow-md hover:bg-blue-600 transition-colors flex items-center justify-center gap-2"
+          disabled={isSubmitting}
+          aria-disabled={isSubmitting}
+          className="w-full py-4 bg-blue-500 text-white font-semibold rounded-2xl shadow-md hover:bg-blue-600 transition-colors flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:bg-blue-500"
         >
           <Plus className="w-5 h-5" />
-          Add {type === 'income' ? 'Income' : 'Expense'}
+          {isSubmitting ? 'Saving...' : `Add ${type === 'income' ? 'Income' : 'Expense'}`}
         </button>
       </form>
     </div>
