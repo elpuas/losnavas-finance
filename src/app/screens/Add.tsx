@@ -263,18 +263,21 @@ export default function Add() {
     isSubmittingRef.current = true;
     setIsSubmitting(true);
 
+    let shouldNavigate = false;
+
     try {
+      console.debug('[Add] submit start', { type });
+      console.debug('[Add] resolving period');
       const periodId = await resolvePeriodId(formData.date);
 
       if (!periodId) {
-        return;
+        throw new Error('Unable to resolve period for transaction date');
       }
-
       if (type === 'income' && selectedIncomeTemplateId === ADD_NEW_TEMPLATE) {
         const templateCreated = await createTemplate(transactionName, 'income', null);
 
         if (!templateCreated) {
-          return;
+          throw new Error('Unable to create income template');
         }
       }
 
@@ -286,24 +289,27 @@ export default function Add() {
         const templateCreated = await createTemplate(transactionName, 'expense', 'fixed');
 
         if (!templateCreated) {
-          return;
+          throw new Error('Unable to create fixed expense template');
         }
       }
 
       if (type === 'income') {
-        const { error } = await supabase.from('income').insert({
+        console.debug('[Add] inserting income');
+        const { data, error } = await supabase.from('income').insert({
           name: transactionName,
           amount,
           user_name: formData.user || null,
           income_date: formData.date,
           period_id: periodId,
         });
+        console.debug('[Add] income insert response', { data, error });
 
         if (error) {
-          return;
+          throw error;
         }
       } else {
-        const { error } = await supabase.from('expenses').insert({
+        console.debug('[Add] inserting expense');
+        const { data, error } = await supabase.from('expenses').insert({
           name: transactionName,
           amount,
           category: formData.category,
@@ -313,18 +319,26 @@ export default function Add() {
           user_name: formData.user || null,
           period_id: periodId,
         });
+        console.debug('[Add] expense insert response', { data, error });
 
         if (error) {
-          return;
+          throw error;
         }
       }
 
       setCurrentPeriodId(periodId);
       refreshCurrentPeriodData();
-      navigate('/');
+      shouldNavigate = true;
+    } catch (error) {
+      console.error('[Add] submit failed', error);
     } finally {
+      console.debug('[Add] submit cleanup');
       isSubmittingRef.current = false;
       setIsSubmitting(false);
+    }
+
+    if (shouldNavigate) {
+      navigate('/');
     }
   };
 
